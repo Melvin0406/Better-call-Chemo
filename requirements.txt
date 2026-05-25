@@ -1,0 +1,9 @@
+openai
+langchain-core
+langchain-text-splitters
+sentence-transformers
+faiss-cpu
+numpy
+python-dotenv
+pymupdf
+streamlit
