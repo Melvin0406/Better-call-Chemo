@@ -1,5 +1,6 @@
 import os
 import glob as globmod
+import pickle
 from typing import Any
 import numpy as np
 import faiss
@@ -9,6 +10,10 @@ from langchain_text_splitters import RecursiveCharacterTextSplitter
 from sentence_transformers import SentenceTransformer
 from sentence_transformers import CrossEncoder
 from openai import OpenAI
+
+INDEX_DIR = "index"
+INDEX_FILE = os.path.join(INDEX_DIR, "sat.faiss")
+CHUNKS_FILE = os.path.join(INDEX_DIR, "sat_chunks.pkl")
 
 # Default configs
 DEFAULT_DATA_DIR = "data/sat"
@@ -210,6 +215,25 @@ def rerank(
     return reranked_results
 
 
+def load_index(
+        index_dir: str = INDEX_DIR,
+) -> tuple[faiss.IndexFlatIP, list[Document]]:
+    """Loads a previously built FAISS index and chunk list from disk."""
+    index_file = os.path.join(index_dir, "sat.faiss")
+    chunks_file = os.path.join(index_dir, "sat_chunks.pkl")
+
+    if not os.path.exists(index_file) or not os.path.exists(chunks_file):
+        raise FileNotFoundError(
+            f"Índice no encontrado en '{index_dir}'. Ejecuta 'python ingest.py' primero."
+        )
+
+    index = faiss.read_index(index_file)
+    with open(chunks_file, "rb") as f:
+        chunks = pickle.load(f)
+
+    return index, chunks
+
+
 SYSTEM_PROMPT = """Eres un asistente especializado en fiscalidad mexicana. Responde ÚNICAMENTE con base en el \
 contexto proporcionado. Sigue estas reglas:
 - Responde siempre en español.
@@ -358,31 +382,18 @@ class Assistant:
 
     @classmethod
     def from_config(cls, config: dict[str, Any] | None = None) -> "Assistant":
-        """Initializes the components required by the assistant and instantiates it
+        """Initializes the assistant by loading a pre-built index from disk.
 
-        The pipeline includes resolved configuration, loaded documents, chunked
-        documents, an embedding model, a FAISS index, and an OpenAI-compatible
-        client.
+        Requires that ingest.py has been run beforehand to build and save the
+        FAISS index and chunk list.
         """
         resolved_config = resolve_config(config)
 
-        print("Loading documents...")
-        docs = load_documents()
-        print(f"  Loaded {len(docs)} documents")
-
-        print("Splitting into chunks...")
-        chunks = split_documents(
-            docs,
-            chunk_size=resolved_config["chunk_size"],
-            chunk_overlap=resolved_config["chunk_overlap"],
-        )
-        print(f"  Created {len(chunks)} chunks")
+        print("Cargando índice...")
+        index, chunks = load_index()
+        print(f"  {index.ntotal} vectores, {len(chunks)} chunks")
 
         embedding_model = SentenceTransformer(resolved_config["embedding_model"])
-
-        print("Building FAISS index...")
-        index = build_index(chunks, embedding_model)
-        print(f"  Indexed {index.ntotal} vectors (dim={index.d})")
 
         client_kwargs = {}
         if resolved_config["api_key"]:
@@ -391,5 +402,5 @@ class Assistant:
             client_kwargs["base_url"] = resolved_config["base_url"]
         client = OpenAI(**client_kwargs)
 
-        print("Ready!\n")
+        print("Listo.\n")
         return cls(index, embedding_model, chunks, client, resolved_config)

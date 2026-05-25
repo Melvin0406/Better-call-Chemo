@@ -18,3 +18,11 @@ Copia `.env.example` a `.env` y llena tu API key:
 ```bash
 cp .env.example .env
 ```
+
+## Uso
+
+Construir el índice de RAG (solo una vez o cuando cambien los documentos):
+
+```bash
+python ingest.py
+```
