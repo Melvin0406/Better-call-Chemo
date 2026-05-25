@@ -1,10 +1,9 @@
-# You might need the following imports. Feel free to change it if you opt for different libraries.
-
 import os
 import glob as globmod
 from typing import Any
 import numpy as np
 import faiss
+import fitz  # PyMuPDF
 from langchain_core.documents import Document
 from langchain_text_splitters import RecursiveCharacterTextSplitter
 from sentence_transformers import SentenceTransformer
@@ -12,11 +11,11 @@ from sentence_transformers import CrossEncoder
 from openai import OpenAI
 
 # Default configs
-DEFAULT_DATA_DIR = "data"
+DEFAULT_DATA_DIR = "data/sat"
 DEFAULT_EMBEDDING_MODEL = "all-MiniLM-L6-v2"
 DEFAULT_LLM_MODEL = "gpt-4.1-mini"
-DEFAULT_CHUNK_SIZE = 256
-DEFAULT_CHUNK_OVERLAP = 32
+DEFAULT_CHUNK_SIZE = 512
+DEFAULT_CHUNK_OVERLAP = 64
 DEFAULT_TOP_K = 4
 DEFAULT_RERANK_MODEL = "cross-encoder/ms-marco-MiniLM-L-6-v2"
 DEFAULT_RETRIEVE_K = 10
@@ -84,31 +83,31 @@ def resolve_config(config: dict[str, Any] | None = None) -> dict[str, Any]:
 
 
 def load_documents(data_dir: str = DEFAULT_DATA_DIR) -> list[Document]:
-    """Loads documents from the personal data folders.
+    """Loads documents from PDF files in data_dir.
 
-    The collection contains one LangChain Document per `.txt` file in the
-    emails, notes, SMS, and calendar folders. Each document stores the file text
-    as `page_content` and includes metadata for the source file path and
-    document type.
+    Creates one LangChain Document per page. Each document stores the page text
+    as `page_content` and includes the source file path, document name, page
+    number, and doc_type in metadata.
     """
     documents = []
 
-    for dir in os.listdir(data_dir):
-        for file in os.listdir(data_dir + "/" + dir):
-            path = data_dir + "/" + dir + "/" + file
-
-            doc_type = dir
-            if dir == "notes": doc_type = "note"
-            elif dir == "emails": doc_type = "email"
-            metadata = {
-                "source": path,
-                "doc_type": doc_type,
-            }
-
-            with open(path) as f:
-                raw_text = f.read()
-            doc = Document(page_content=raw_text, metadata=metadata)
-            documents.append(doc)
+    for pdf_path in globmod.glob(os.path.join(data_dir, "*.pdf")):
+        doc_name = os.path.splitext(os.path.basename(pdf_path))[0]
+        pdf = fitz.open(pdf_path)
+        for page_num, page in enumerate(pdf, start=1):
+            text = page.get_text()
+            if not text.strip():
+                continue
+            documents.append(Document(
+                page_content=text,
+                metadata={
+                    "source": pdf_path,
+                    "doc_name": doc_name,
+                    "page": page_num,
+                    "doc_type": "sat",
+                },
+            ))
+        pdf.close()
 
     return documents
 
@@ -211,16 +210,17 @@ def rerank(
     return reranked_results
 
 
-SYSTEM_PROMPT = """You are a technical assistant. Answer the user's question using ONLY the provided context. \
-Follow these rules:
-- If the context doesn't contain the answer, say "I don't have enough information to answer this question."
-- Be concise and precise.
-- Do not use prior knowledge outside of the context.
-- At the end of the message, cite the files with information that was actually used to formulate the answer \
-using the following format:
-"References:
-- path/to/file1.txt
-- path/to/file2.txt
+SYSTEM_PROMPT = """Eres un asistente especializado en fiscalidad mexicana. Responde ÚNICAMENTE con base en el \
+contexto proporcionado. Sigue estas reglas:
+- Responde siempre en español.
+- Si el contexto no contiene la respuesta, di "No encontré información suficiente en los documentos para \
+responder esta pregunta."
+- Cita el artículo o regla específica cuando sea posible (ej. "según el Artículo 29 del CFF...").
+- No uses conocimiento previo fuera del contexto.
+- Advierte que tus respuestas son orientativas y no constituyen asesoría fiscal formal.
+- Al final de tu respuesta, indica las fuentes consultadas con el siguiente formato:
+"Fuentes:
+- NOMBRE_DOCUMENTO, página X
 - ..." """
 
 
@@ -272,13 +272,13 @@ class Assistant:
 
         all_results = self.filter_results(all_results, doc_filter) # Optional document type filtering
 
-        # Sort by score and source
-        seen_sources = set()
+        # Deduplicate by (doc_name, page) keeping highest-scoring chunk per page
+        seen_pages = set()
         unique_results = []
         for r in sorted(all_results, key=lambda x: x["score"], reverse=True):
-            source = r["metadata"]["source"]
-            if source not in seen_sources:
-                seen_sources.add(source)
+            key = (r["metadata"]["doc_name"], r["metadata"]["page"])
+            if key not in seen_pages:
+                seen_pages.add(key)
                 unique_results.append(r)
 
         # Reranking
@@ -290,7 +290,7 @@ class Assistant:
         )
 
         context = "\n\n".join(
-            f"[source: {r['metadata']['source']} | type: {r['metadata']['doc_type']}]\n{r['text']}"
+            f"[documento: {r['metadata']['doc_name']} | página: {r['metadata']['page']}]\n{r['text']}"
             for r in reranked_results
         )
         user_message = f"Context:\n{context}\n\nQuestion: {question}"
@@ -325,19 +325,19 @@ class Assistant:
         return [question] + variants
 
     def parse_filters(self, question: str) -> tuple[str, str | None]:
-
+        # Filters by doc_name (e.g. /cff restricts search to CFF.pdf only)
         filter_map = {
-            "/notes": "note",
-            "/email": "email",
-            "/sms": "sms",
-            "/calendar": "calendar",
+            "/cff": "CFF",
+            "/lisr": "LISR",
+            "/liva": "LIVA",
+            "/rmf": "RMF_2026",
         }
 
         detected_filter = None
 
-        for tag, doc_type in filter_map.items():
+        for tag, doc_name in filter_map.items():
             if tag in question:
-                detected_filter = doc_type
+                detected_filter = doc_name
                 question = question.replace(tag, "").strip()
 
         return question, detected_filter
@@ -345,15 +345,15 @@ class Assistant:
     def filter_results(
             self,
             results: list[dict],
-            doc_type: str | None,
+            doc_name: str | None,
     ) -> list[dict]:
 
-        if doc_type is None:
+        if doc_name is None:
             return results
 
         return [
             r for r in results
-            if r["metadata"]["doc_type"] == doc_type
+            if r["metadata"]["doc_name"] == doc_name
         ]
 
     @classmethod
