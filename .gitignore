@@ -6,11 +6,11 @@ __pycache__/
 venv/
 env/
 
-# PDF documents (large files — add manually)
+# PDFs
 data/sat/*.pdf
 data/leyes/*.pdf
 data/contratos/*.pdf
 
-# Generated FAISS indexes
+# Indices FAISS generados
 index/*.faiss
 index/*.pkl

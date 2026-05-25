@@ -18,19 +18,3 @@ Copia `.env.example` a `.env` y llena tu API key:
 ```bash
 cp .env.example .env
 ```
-
-## Uso
-
-Primero, coloca los PDFs del SAT en la carpeta `data/sat/`.
-
-Luego, indexa los documentos (solo necesitas hacerlo una vez):
-
-```bash
-python ingest.py
-```
-
-Finalmente, inicia la aplicación:
-
-```bash
-streamlit run app.py
-```
