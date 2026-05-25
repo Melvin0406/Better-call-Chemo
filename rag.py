@@ -12,7 +12,7 @@ from openai import OpenAI
 
 # Default configs
 DEFAULT_DATA_DIR = "data/sat"
-DEFAULT_EMBEDDING_MODEL = "all-MiniLM-L6-v2"
+DEFAULT_EMBEDDING_MODEL = "paraphrase-multilingual-MiniLM-L12-v2"
 DEFAULT_LLM_MODEL = "gpt-4.1-mini"
 DEFAULT_CHUNK_SIZE = 512
 DEFAULT_CHUNK_OVERLAP = 64
@@ -317,9 +317,9 @@ class Assistant:
     def expand_query(self, question: str) -> list[str]:
         response = self.client.chat.completions.create(
         model=self.llm_model,
-        messages=[{"role": "user", "content": f"Generate 3 alternative \
-        phrasings of this question for semantic search. Return only the \
-        questions, one per line.\n\nQuestion: {question}"}],
+        messages=[{"role": "user", "content": f"Genera 3 formas alternativas de formular esta pregunta \
+        para búsqueda semántica en documentos fiscales mexicanos. Devuelve solo las preguntas, \
+        una por línea, sin numeración.\n\nPregunta: {question}"}],
         )
         variants = response.choices[0].message.content.strip().split("\n")
         return [question] + variants
