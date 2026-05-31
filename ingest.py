@@ -6,7 +6,7 @@ from dotenv import load_dotenv
 from sentence_transformers import SentenceTransformer
 
 from rag import (
-    DEFAULT_DATA_DIR,
+    DEFAULT_DATA_DIRS,
     build_index,
     load_documents,
     resolve_config,
@@ -14,8 +14,8 @@ from rag import (
 )
 
 INDEX_DIR = "index"
-INDEX_FILE = os.path.join(INDEX_DIR, "sat.faiss")
-CHUNKS_FILE = os.path.join(INDEX_DIR, "sat_chunks.pkl")
+INDEX_FILE = os.path.join(INDEX_DIR, "leyes.faiss")
+CHUNKS_FILE = os.path.join(INDEX_DIR, "leyes_chunks.pkl")
 
 
 def main():
@@ -24,10 +24,14 @@ def main():
         "chunk_size": os.getenv("CHUNK_SIZE"),
         "chunk_overlap": os.getenv("CHUNK_OVERLAP"),
         "embedding_model": os.getenv("EMBEDDING_MODEL"),
+        "data_dirs": os.getenv("DATA_DIRS", "").split(",") if os.getenv("DATA_DIRS") else None,
     })
 
+    data_dirs = config["data_dirs"] or DEFAULT_DATA_DIRS
+    print(f"Directorios a indexar: {data_dirs}")
+
     print("Cargando documentos...")
-    docs = load_documents(DEFAULT_DATA_DIR)
+    docs = load_documents(data_dirs)
     doc_names = sorted(set(d.metadata["doc_name"] for d in docs))
     print(f"  {len(docs)} páginas de {len(doc_names)} documentos: {', '.join(doc_names)}")
 

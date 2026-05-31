@@ -12,10 +12,11 @@ from sentence_transformers import CrossEncoder
 from openai import OpenAI
 
 INDEX_DIR = "index"
-INDEX_FILE = os.path.join(INDEX_DIR, "sat.faiss")
-CHUNKS_FILE = os.path.join(INDEX_DIR, "sat_chunks.pkl")
+INDEX_FILE = os.path.join(INDEX_DIR, "leyes.faiss")
+CHUNKS_FILE = os.path.join(INDEX_DIR, "leyes_chunks.pkl")
 
 # Default configs
+DEFAULT_DATA_DIRS = ["data/sat", "data/leyes"] 
 DEFAULT_DATA_DIR = "data/sat"
 DEFAULT_EMBEDDING_MODEL = "paraphrase-multilingual-MiniLM-L12-v2"
 DEFAULT_LLM_MODEL = "gpt-4.1-mini"
@@ -25,6 +26,46 @@ DEFAULT_TOP_K = 4
 DEFAULT_RERANK_MODEL = "cross-encoder/ms-marco-MiniLM-L-6-v2"
 DEFAULT_RETRIEVE_K = 10
 DEFAULT_FINAL_K = 4
+
+CATEGORY_MAP: dict[str, str] = {
+    "CPEUM":     "constitucional",
+    "CCF":       "civil",
+    "CNPCF":     "civil",
+    "CFPC":      "civil",
+    "LFDA":      "civil",
+    "LFPCA":     "civil",
+    "CPF":       "penal",
+    "CNPP":      "penal",
+    "LFCDO":     "penal",
+    "LFRA":      "penal",
+    "LFT":       "laboral",
+    "LSS":       "laboral",
+    "LFTSE":     "laboral",
+    "LIFNVT":    "laboral",
+    "LISSSTE":   "laboral",
+    "CCom":      "mercantil",
+    "LGSM":      "mercantil",
+    "LGTOC":     "mercantil",
+    "LIC":       "mercantil",
+    "LFPDPPP":   "mercantil",
+    "LFPA":      "administrativo",
+    "LAmp":      "administrativo",
+    "LFPRH":     "administrativo",
+    "LGRA":      "administrativo",
+    "LFPPI":     "propiedad_intelectual",
+    "LFCE":      "propiedad_intelectual",
+    "LFPC":      "consumidor",
+    "LGS":       "salud",
+    "LGDNNA":    "salud",
+    "LGAMVLV":   "salud",
+    "LGEEPA":    "ambiental",
+    "LGDFS":     "ambiental",
+    "CFF":       "fiscal",
+    "LISR":      "fiscal",
+    "LIVA":      "fiscal",
+    "LIEPS":     "fiscal",
+    "RMF_2026":  "fiscal",
+}
 
 
 def _parse_int_setting(name: str, value: Any) -> int:
@@ -44,6 +85,7 @@ def resolve_config(config: dict[str, Any] | None = None) -> dict[str, Any]:
         "base_url": config.get("base_url", None),
         "model": config.get("model") or DEFAULT_LLM_MODEL,
         "embedding_model": config.get("embedding_model") or DEFAULT_EMBEDDING_MODEL,
+        "data_dirs": config.get("data_dirs") or None,
         "top_k": _parse_int_setting(
             "TOP_K",
             config.get("top_k") or DEFAULT_TOP_K,
@@ -86,6 +128,17 @@ def resolve_config(config: dict[str, Any] | None = None) -> dict[str, Any]:
 
     return resolved
 
+def _infer_doc_type(doc_name: str, data_dir: str) -> str:
+    """Infiere el doc_type a partir del nombre del archivo o directorio."""
+    upper = doc_name.upper()
+    if upper in CATEGORY_MAP:
+        return CATEGORY_MAP[upper]
+    for part in data_dir.replace("\\", "/").split("/"):
+        if part in ("sat",):
+            return "fiscal"
+        if part in ("leyes",):
+            return "ley_federal"
+    return "ley_federal"
 
 def load_documents(data_dir: str = DEFAULT_DATA_DIR) -> list[Document]:
     """Loads documents from PDF files in data_dir.
@@ -94,25 +147,26 @@ def load_documents(data_dir: str = DEFAULT_DATA_DIR) -> list[Document]:
     as `page_content` and includes the source file path, document name, page
     number, and doc_type in metadata.
     """
+    dirs = [data_dir] if isinstance(data_dir, str) else list(data_dir)
     documents = []
 
-    for pdf_path in globmod.glob(os.path.join(data_dir, "*.pdf")):
-        doc_name = os.path.splitext(os.path.basename(pdf_path))[0]
-        pdf = fitz.open(pdf_path)
-        for page_num, page in enumerate(pdf, start=1):
-            text = page.get_text()
-            if not text.strip():
-                continue
-            documents.append(Document(
-                page_content=text,
-                metadata={
-                    "source": pdf_path,
-                    "doc_name": doc_name,
-                    "page": page_num,
-                    "doc_type": "sat",
-                },
-            ))
-        pdf.close()
+    for directory in dirs:
+        for pdf_path in globmod.glob(os.path.join(directory, "**", "*.pdf"), recursive=True):
+            doc_name = os.path.splitext(os.path.basename(pdf_path))[0]
+            doc_type = _infer_doc_type(doc_name, pdf_path)
+            pdf = fitz.open(pdf_path)
+            for page_num, page in enumerate(pdf, start=1):
+                text = page.get_text()
+                if not text.strip():
+                    continue
+                documents.append(Document(
+                    page_content=text,
+                    metadata={"source": pdf_path, 
+                              "doc_name": doc_name, 
+                              "page": page_num, 
+                              "doc_type": doc_type},
+                ))
+            pdf.close()
 
     return documents
 
@@ -219,8 +273,8 @@ def load_index(
         index_dir: str = INDEX_DIR,
 ) -> tuple[faiss.IndexFlatIP, list[Document]]:
     """Loads a previously built FAISS index and chunk list from disk."""
-    index_file = os.path.join(index_dir, "sat.faiss")
-    chunks_file = os.path.join(index_dir, "sat_chunks.pkl")
+    index_file = os.path.join(index_dir, "leyes.faiss")
+    chunks_file = os.path.join(index_dir, "leyes_chunks.pkl")
 
     if not os.path.exists(index_file) or not os.path.exists(chunks_file):
         raise FileNotFoundError(
@@ -234,18 +288,25 @@ def load_index(
     return index, chunks
 
 
-SYSTEM_PROMPT = """Eres un asistente especializado en fiscalidad mexicana. Responde ÚNICAMENTE con base en el \
-contexto proporcionado. Sigue estas reglas:
-- Responde siempre en español.
-- Si el contexto no contiene la respuesta, di "No encontré información suficiente en los documentos para \
-responder esta pregunta."
-- Cita el artículo o regla específica cuando sea posible (ej. "según el Artículo 29 del CFF...").
-- No uses conocimiento previo fuera del contexto.
-- Advierte que tus respuestas son orientativas y no constituyen asesoría fiscal formal.
-- Al final de tu respuesta, indica las fuentes consultadas con el siguiente formato:
-"Fuentes:
+SYSTEM_PROMPT = """Eres un asistente especializado en derecho mexicano. Respondes preguntas sobre leyes \
+federales de México: derecho civil, penal, laboral, mercantil, administrativo, fiscal, constitucional, \
+de salud, ambiental y más. Sigue estas reglas estrictamente:
+ 
+1. Responde ÚNICAMENTE con base en el contexto proporcionado.
+2. Responde siempre en español.
+3. Si el contexto no contiene la respuesta, di: "No encontré información suficiente en los documentos \
+para responder esta pregunta."
+4. Cita el artículo o disposición específica cuando sea posible \
+(ej. "según el Artículo 123 de la Constitución...", "conforme al Artículo 47 de la LFT...").
+5. No uses conocimiento previo fuera del contexto proporcionado.
+6. SIEMPRE advierte que tus respuestas son orientativas y no constituyen asesoría legal formal; \
+recomienda consultar con un abogado para casos concretos.
+7. Al final de tu respuesta, indica las fuentes consultadas con el siguiente formato exacto:
+ 
+Fuentes:
 - NOMBRE_DOCUMENTO, página X
-- ..." """
+- ...
+"""
 
 
 class Assistant:
@@ -284,8 +345,7 @@ class Assistant:
         appended to history alongside the user message.
         """
 
-        question, doc_filter = self.parse_filters(question)
-
+        question, doc_filter, type_filter = self.parse_filters(question)
         questions = self.expand_query(question) # Query expansion
         all_results = []
 
@@ -294,7 +354,7 @@ class Assistant:
             results = retrieve(q, self.index, self.model, self.chunks, k or overfetch_k)
             all_results.extend(results)
 
-        all_results = self.filter_results(all_results, doc_filter) # Optional document type filtering
+        all_results = self.filter_results(all_results, doc_filter, type_filter) # Apply filters to retrieved results
 
         # Deduplicate by (doc_name, page) keeping highest-scoring chunk per page
         seen_pages = set()
@@ -342,43 +402,73 @@ class Assistant:
         response = self.client.chat.completions.create(
         model=self.llm_model,
         messages=[{"role": "user", "content": f"Genera 3 formas alternativas de formular esta pregunta \
-        para búsqueda semántica en documentos fiscales mexicanos. Devuelve solo las preguntas, \
+        para búsqueda semántica en leyes federales mexicanas. Devuelve solo las preguntas, \
         una por línea, sin numeración.\n\nPregunta: {question}"}],
         )
         variants = response.choices[0].message.content.strip().split("\n")
         return [question] + variants
 
-    def parse_filters(self, question: str) -> tuple[str, str | None]:
-        # Filters by doc_name (e.g. /cff restricts search to CFF.pdf only)
-        filter_map = {
-            "/cff": "CFF",
-            "/lisr": "LISR",
-            "/liva": "LIVA",
-            "/rmf": "RMF_2026",
-        }
-
-        detected_filter = None
-
-        for tag, doc_name in filter_map.items():
+    DOC_FILTER_MAP: dict[str, str] = {
+        "/cff":   "CFF",
+        "/lisr":  "LISR",
+        "/liva":  "LIVA",
+        "/rmf":   "RMF_2026",
+        "/cpeum": "CPEUM",
+        "/ccf":   "CCF",
+        "/lft":   "LFT",
+        "/cpf":   "CPF",
+        "/cnpp":  "CNPP",
+        "/la":    "LAmp",
+        "/lgsm":  "LGSM",
+        "/lfpc":  "LFPC",
+        "/lgs":   "LGS",
+    }
+ 
+    TYPE_FILTER_MAP: dict[str, str] = {
+        "/civil":           "civil",
+        "/penal":           "penal",
+        "/laboral":         "laboral",
+        "/mercantil":       "mercantil",
+        "/administrativo":  "administrativo",
+        "/fiscal":          "fiscal",
+        "/constitucional":  "constitucional",
+        "/salud":           "salud",
+        "/ambiental":       "ambiental",
+        "/ip":              "propiedad_intelectual",
+        "/consumidor":      "consumidor",
+    }
+ 
+    def parse_filters(self, question: str) -> tuple[str, str | None, str | None]:
+        """Extrae filtros de la pregunta y devuelve (pregunta_limpia, doc_filter, type_filter)."""
+        doc_filter  = None
+        type_filter = None
+ 
+        for tag, doc_name in self.DOC_FILTER_MAP.items():
             if tag in question:
-                detected_filter = doc_name
-                question = question.replace(tag, "").strip()
-
-        return question, detected_filter
+                doc_filter = doc_name
+                question   = question.replace(tag, "").strip()
+                break
+ 
+        for tag, type_name in self.TYPE_FILTER_MAP.items():
+            if tag in question:
+                type_filter = type_name
+                question    = question.replace(tag, "").strip()
+                break
+ 
+        return question, doc_filter, type_filter
 
     def filter_results(
             self,
             results: list[dict],
             doc_name: str | None,
+            doc_type: str | None,
     ) -> list[dict]:
 
-        if doc_name is None:
-            return results
-
-        return [
-            r for r in results
-            if r["metadata"]["doc_name"] == doc_name
-        ]
+        if doc_name is not None:
+            results = [r for r in results if r["metadata"]["doc_name"] == doc_name]
+        if doc_type is not None:
+            results = [r for r in results if r["metadata"]["doc_type"] == doc_type]
+        return results
 
     @classmethod
     def from_config(cls, config: dict[str, Any] | None = None) -> "Assistant":
