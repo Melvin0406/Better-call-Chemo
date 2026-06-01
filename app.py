@@ -1,10 +1,9 @@
 import os
-from pathlib import Path
 
 import streamlit as st
 from dotenv import load_dotenv
 
-from rag import Assistant, resolve_config
+from rag import Assistant
 
 
 def load_environment_config() -> dict[str, str | None]:
@@ -16,21 +15,14 @@ def load_environment_config() -> dict[str, str | None]:
     }
 
 
-def init_assistant() -> Assistant | None:
+def init_assistant() -> Assistant:
     config = load_environment_config()
-    if not config["api_key"]:
-        st.warning(
-            "No se encontró una clave de OpenAI en las variables de entorno. "
-            "Establece OPENAI_API_KEY o API_KEY antes de ejecutar la aplicación."
-        )
-
     try:
-        assistant = Assistant.from_config(config)
-        return assistant
-    except FileNotFoundError as exc:
+        return Assistant.from_config(config)
+    except FileNotFoundError:
         st.error(
-            "No se encontró el índice FAISS. Ejecuta `python ingest.py` primero para "
-            "generar los archivos de índice en la carpeta `index/`."
+            "El índice de documentos no existe. "
+            "Ejecuta `python ingest.py` en la terminal y recarga la página."
         )
         st.stop()
     except Exception as exc:
@@ -38,124 +30,96 @@ def init_assistant() -> Assistant | None:
         st.stop()
 
 
-def apply_theme() -> None:
-    st.set_page_config(
-        page_title="Better Call Chemo",
-        page_icon="none",
-        layout="wide",
-    )
-
-    st.markdown(
-        """
-        <style>
-        :root {
-            color-scheme: dark;
-        }
-        .css-1d391kg {
-            background-color: #07142d !important;
-        }
-        .stApp {
-            background: #031224;
-            color: #e9f2ff;
-        }
-        .css-18e3th9 {
-            background-color: #07142d;
-        }
-        .stButton>button {
-            background-color: #1c4db7;
-            color: #ffffff;
-            border: 1px solid #4da6ff;
-        }
-        .stButton>button:hover {
-            background-color: #356bc4;
-        }
-        .stTextInput>div>div>input,
-        .stTextArea>div>div>textarea,
-        .stSelectbox>div>div>div>div {
-            border: 1px solid #4da6ff !important;
-            box-shadow: none !important;
-            background-color: #0c1a3a !important;
-            color: #e9f2ff !important;
-        }
-        .stTextInput>div>div>input:focus,
-        .stTextArea>div>div>textarea:focus {
-            border-color: #70b4ff !important;
-            outline: none !important;
-            box-shadow: 0 0 0 2px rgba(77, 166, 255, 0.2);
-        }
-        .css-1x8cf1d {
-            background-color: #07142d !important;
-        }
-        .css-10trblm {
-            background-color: #07142d !important;
-        }
-        .stAlert {
-            background-color: #0b213d !important;
-            border-left: 4px solid #4da6ff !important;
-        }
-        </style>
-        """,
-        unsafe_allow_html=True,
-    )
+st.set_page_config(
+    page_title="Better Call Chemo",
+    page_icon="⚖️",
+    layout="wide",
+)
 
 
 def main() -> None:
-    apply_theme()
+    # ── Sidebar ────────────────────────────────────────────────────────────────
+    with st.sidebar:
+        st.title("⚖️ Better Call Chemo")
+        st.caption("Asistente legal y fiscal mexicano")
+        st.markdown("---")
 
-    st.title("Better Call Chemo")
-    st.markdown(
-        "Una interfaz RAG para consultar leyes federales mexicanas usando documentos indexados. "
-        "Preguntas con filtros como `/LISR` o `/fiscal` son compatibles."
-    )
+        st.markdown("### ¿Qué puedo preguntarle?")
+        st.markdown(
+            "Consulta sobre leyes federales mexicanas: ISR, IVA, "
+            "derecho laboral, penal, civil, mercantil y más. "
+            "Las respuestas se basan en los textos oficiales de los documentos indexados."
+        )
 
+        st.markdown("---")
+        st.markdown("### Ejemplos de preguntas")
+        st.markdown(
+            "- ¿Cuáles son mis deducciones personales como asalariado?\n"
+            "- ¿Qué pasa si no presento mi declaración anual?\n"
+            "- ¿Cuándo estoy obligado a cobrar IVA?\n"
+            "- ¿Qué derechos tengo si me despiden sin causa justificada?\n"
+            "- ¿Qué es el RFC y cómo se tramita?"
+        )
+
+        st.markdown("---")
+        st.markdown("### Filtros disponibles")
+        st.markdown(
+            "Agrega un filtro al final de tu pregunta para buscar en un área o documento específico:\n\n"
+            "**Por área:**  \n"
+            "`/fiscal` `/laboral` `/penal` `/civil`  \n"
+            "`/mercantil` `/administrativo` `/constitucional`\n\n"
+            "**Por documento:**  \n"
+            "`/cff` `/lisr` `/liva` `/rmf` `/lft` `/cpf`"
+        )
+
+        st.markdown("---")
+        if st.button("🗑️ Nueva conversación", use_container_width=True):
+            st.session_state.assistant.clear_history()
+            st.session_state.messages = []
+            st.rerun()
+
+        st.markdown("---")
+        st.caption(
+            "Las respuestas son orientativas y no constituyen asesoría legal formal. "
+            "Consulta con un abogado o contador para casos concretos."
+        )
+
+    # ── Inicializar estado ─────────────────────────────────────────────────────
     if "assistant" not in st.session_state:
-        st.session_state.assistant = init_assistant()
+        with st.spinner("Cargando documentos..."):
+            st.session_state.assistant = init_assistant()
         st.session_state.messages = []
 
     assistant: Assistant = st.session_state.assistant
 
-    with st.expander("Configuración de conexión", expanded=False):
-        config = load_environment_config()
-        st.write(
-            "Se cargó la siguiente configuración desde el entorno (solo para lectura):"
-        )
-        st.write({
-            "OPENAI_API_KEY": bool(config["api_key"]),
-            "OPENAI_BASE_URL / BASE_URL": config["base_url"],
-            "LLM_MODEL / MODEL": config["model"],
-        })
+    # ── Historial de mensajes ──────────────────────────────────────────────────
+    CHEMO_AVATAR = "chemo.png"
 
-    col1, col2 = st.columns([3, 1])
-    with col1:
-        query = st.text_area(
-            "Pregunta",
-            value="",
-            height=140,
-            placeholder="Escribe tu pregunta sobre leyes federales mexicanas aquí...",
-        )
-    with col2:
-        st.write("")
-        st.write("")
-        if st.button("Clear Context"):
-            assistant.clear_history()
-            st.session_state.messages = []
-            st.success("Contexto y historial de conversación borrados.")
+    if not st.session_state.messages:
+        with st.chat_message("assistant", avatar=CHEMO_AVATAR):
+            st.markdown(
+                "Hola, soy **Chemo**, tu asistente legal y fiscal mexicano. "
+                "Puedo ayudarte a consultar el Código Fiscal, la Ley del ISR, "
+                "la Ley Federal del Trabajo y muchas otras leyes federales. "
+                "\n\n¿En qué te puedo ayudar hoy?"
+            )
 
-    if st.button("Enviar"):
-        if not query.strip():
-            st.warning("Escribe una pregunta antes de enviar.")
-        else:
-            with st.spinner("Consultando al asistente..."):
-                answer = assistant.ask(query)
-            st.session_state.messages.append((query, answer))
+    for msg in st.session_state.messages:
+        avatar = CHEMO_AVATAR if msg["role"] == "assistant" else None
+        with st.chat_message(msg["role"], avatar=avatar):
+            st.markdown(msg["content"])
 
-    if st.session_state.messages:
-        st.markdown("---")
-        st.subheader("Historial de conversación")
-        for user_message, assistant_message in st.session_state.messages[::-1]:
-            st.markdown(f"**Tú:** {user_message}")
-            st.markdown(f"**Asistente:** {assistant_message}")
-            st.markdown("---")
+    # ── Input del usuario ──────────────────────────────────────────────────────
+    if prompt := st.chat_input("Escribe tu pregunta aquí..."):
+        with st.chat_message("user"):
+            st.markdown(prompt)
+        st.session_state.messages.append({"role": "user", "content": prompt})
+
+        with st.chat_message("assistant", avatar=CHEMO_AVATAR):
+            with st.spinner("Consultando documentos..."):
+                answer = assistant.ask(prompt)
+            st.markdown(answer)
+        st.session_state.messages.append({"role": "assistant", "content": answer})
 
 
 if __name__ == "__main__":
