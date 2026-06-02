@@ -26,3 +26,9 @@ Construir el índice de RAG (solo una vez o cuando cambien los documentos):
 ```bash
 python ingest.py
 ```
+
+Correr la aplicación:
+
+```bash
+streamlit run app.py
+```
