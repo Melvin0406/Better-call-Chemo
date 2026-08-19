@@ -1,5 +1,3 @@
-<img src="chemo.png" width="110" align="right" alt="Chemo" />
-
 # Better Call Chemo
 
 Asistente legal y fiscal mexicano construido sobre RAG (Retrieval-Augmented Generation). Responde preguntas sobre legislación federal mexicana citando los textos oficiales, en lugar de depender de lo que el modelo "recuerde".
@@ -166,17 +164,7 @@ Todo se puede ajustar por variables de entorno sin tocar el código (`resolve_co
 
 ## Autoría
 
-Proyecto de equipo desarrollado en el marco de la materia de Procesamiento de Lenguaje Natural (CETYS Universidad, 2026). El pipeline base de RAG proviene de un ejercicio de clase realizado en equipo; este repositorio lo convierte en una aplicación funcional sobre un dominio real.
-
-| Contribución | Autor |
-|---|---|
-| Adaptación del pipeline a PDFs (PyMuPDF, un `Document` por página con metadatos) | [Melvin0406](https://github.com/Melvin0406) |
-| Cambio a embeddings multilingües y expansión de consulta en español | [Melvin0406](https://github.com/Melvin0406) |
-| Capa de indexación persistente (`ingest.py`, `load_index`) | [Melvin0406](https://github.com/Melvin0406) |
-| Clasificación por área (`CATEGORY_MAP`, `_infer_doc_type`) y filtros | [Melvin0406](https://github.com/Melvin0406) · [CheminGod](https://github.com/CheminGod) |
-| Interfaz de Streamlit — versión inicial | [DECastaV](https://github.com/DECastaV) |
-| Interfaz de Streamlit — sidebar, filtros, historial y estado | [Melvin0406](https://github.com/Melvin0406) |
-| Pipeline base de RAG (retrieval, rerank, `Assistant`) | Ejercicio de clase en equipo |
+Proyecto de equipo desarrollado para la materia de Procesamiento de Lenguaje Natural (CETYS Universidad, 2026), junto con [CheminGod](https://github.com/CheminGod), [DECastaV](https://github.com/DECastaV) y [M-Alcantar](https://github.com/M-Alcantar).
 
 ---
 
